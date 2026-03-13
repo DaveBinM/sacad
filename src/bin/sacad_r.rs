@@ -92,6 +92,25 @@ impl<S: AsRef<str>> CoverOutputPattern<S> {
     }
 }
 
+/// Extract artist/album from directory structure as a fallback when file tags are absent.
+/// Expects the conventional layout `…/Artist/Album/track.flac`.
+fn tags_from_path(audio_files: &[PathBuf], probe_embedded_cover: bool) -> Option<tags::Tags> {
+    let first = audio_files.first()?;
+    let album_dir = first.parent()?;
+    let album = album_dir.file_name()?.to_string_lossy().into_owned();
+    let artist = album_dir
+        .parent()?
+        .file_name()?
+        .to_string_lossy()
+        .into_owned();
+    Some(tags::Tags {
+        artist: Some(artist),
+        album,
+        // If no tags could be read, assume no embedded cover either
+        has_embedded_cover: probe_embedded_cover.then_some(false),
+    })
+}
+
 /// The workers are IO bound and limited by source rate limits, so no need for more than that
 const WORKER_COUNT: usize = 8;
 
@@ -219,13 +238,24 @@ async fn main() -> anyhow::Result<()> {
     for audio_files in AudioFileIterator::new(&cl_args.lib_root_dir, Arc::clone(&stats)) {
         update_progress_bar(&stats, &progress_bar);
 
-        // Read tags
-        let Some(tags) =
-            tags::read_metadata(&audio_files, matches!(cl_args.output, CoverOutput::Embed))
-        else {
-            log::warn!("Unable to extract metadata from files {audio_files:?}");
-            stats.errors.fetch_add(1, Ordering::Relaxed);
-            continue;
+        // Read tags from embedded metadata, falling back to folder names
+        let probe_cover = matches!(cl_args.output, CoverOutput::Embed);
+        let tags = match tags::read_metadata(&audio_files, probe_cover) {
+            Some(tags) => tags,
+            None => match tags_from_path(&audio_files, probe_cover) {
+                Some(tags) => {
+                    log::debug!(
+                        "No embedded tags, using folder names for {:?}",
+                        audio_files.first()
+                    );
+                    tags
+                }
+                None => {
+                    log::warn!("Unable to extract metadata from files {audio_files:?}");
+                    stats.errors.fetch_add(1, Ordering::Relaxed);
+                    continue;
+                }
+            },
         };
 
         // Compute output

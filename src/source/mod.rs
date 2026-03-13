@@ -172,8 +172,13 @@ fn normalize<S>(s: S) -> String
 where
     S: AsRef<str>,
 {
+    use unicode_normalization::UnicodeNormalization as _;
+    // Apply NFC first: macOS filesystems store filenames in NFD (e.g. "Tie\u{308}sto"),
+    // which would leave combining diacritics as standalone chars after per-char decomposition.
+    // NFC composes them back (e.g. "Tiësto") so the subsequent decompose step strips them correctly.
     s.as_ref()
         .chars()
+        .nfc()
         .flat_map(|oc| {
             let mut nc = None;
             unicode_normalization::char::decompose_canonical(oc, |c| {
@@ -201,6 +206,9 @@ pub(crate) mod tests {
     #[test]
     fn normalize() {
         assert_eq!(super::normalize("AÀh' JÉeêé"), "aah' jeeee");
+        // NFD-encoded strings (common on macOS filesystems) must normalize the same as NFC
+        assert_eq!(super::normalize("Tie\u{308}sto"), "tiesto");
+        assert_eq!(super::normalize("Ro\u{308}yksopp"), "royksopp");
     }
 
     pub(crate) async fn source_has_results<S>(source: S, source_name: SourceName)
