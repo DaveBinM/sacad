@@ -5,6 +5,7 @@ mod deezer;
 mod discogs;
 mod itunes;
 mod lastfm;
+mod qobuz;
 
 use std::{cmp, sync::Arc, time::Duration};
 
@@ -16,7 +17,7 @@ use crate::{
     http::{self, SourceHttpClient},
     source::{
         coverartarchive::CoverArtArchive, deezer::Deezer, discogs::Discogs, itunes::Itunes,
-        lastfm::LastFm,
+        lastfm::LastFm, qobuz::Qobuz,
     },
 };
 
@@ -152,6 +153,7 @@ impl From<&SourceName> for Box<dyn Source> {
             SourceName::Discogs => Box::new(Discogs),
             SourceName::Itunes => Box::new(Itunes),
             SourceName::LastFm => Box::new(LastFm),
+            SourceName::Qobuz => Box::new(Qobuz),
         }
     }
 }

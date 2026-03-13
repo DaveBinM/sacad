@@ -174,6 +174,7 @@ pub enum SourceName {
     Discogs,
     Itunes,
     LastFm,
+    Qobuz,
 }
 
 #[cfg(test)]
