@@ -176,8 +176,11 @@ where
     // Apply NFC first: macOS filesystems store filenames in NFD (e.g. "Tie\u{308}sto"),
     // which would leave combining diacritics as standalone chars after per-char decomposition.
     // NFC composes them back (e.g. "Tiësto") so the subsequent decompose step strips them correctly.
-    s.as_ref()
-        .chars()
+    //
+    // Also replace isolated underscores used as path-safe substitutes for "/" by some Qobuz
+    // download tools (e.g. "Smoke _ Voyage" stored in tags → "Smoke / Voyage" on Qobuz).
+    let s = s.as_ref().replace(" _ ", " / ");
+    s.chars()
         .nfc()
         .flat_map(|oc| {
             let mut nc = None;
@@ -209,6 +212,11 @@ pub(crate) mod tests {
         // NFD-encoded strings (common on macOS filesystems) must normalize the same as NFC
         assert_eq!(super::normalize("Tie\u{308}sto"), "tiesto");
         assert_eq!(super::normalize("Ro\u{308}yksopp"), "royksopp");
+        // Isolated underscores used as "/" substitutes by some Qobuz download tools
+        assert_eq!(super::normalize("Smoke _ Voyage"), "smoke / voyage");
+        assert_eq!(super::normalize("Converge _ Napalm Death Split"), "converge / napalm death split");
+        // Underscore within a word must not be changed
+        assert_eq!(super::normalize("some_word"), "some_word");
     }
 
     pub(crate) async fn source_has_results<S>(source: S, source_name: SourceName)
