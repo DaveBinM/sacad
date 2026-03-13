@@ -222,7 +222,7 @@ pub async fn search_and_download(
         }
     }
 
-    log::warn!(
+    log::debug!(
         "No cover to download for artist {:?} and album {:?}",
         query.artist,
         query.album

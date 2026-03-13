@@ -165,13 +165,9 @@ async fn handle_work(
         }
         WorkOutput::File(filepath) => (filepath.to_owned(), None),
     };
-    match search_and_download(
-        &output,
-        Arc::new(work.query),
-        Arc::clone(search_opts),
-        image_proc,
-    )
-    .await?
+    let query = Arc::new(work.query);
+    match search_and_download(&output, Arc::clone(&query), Arc::clone(search_opts), image_proc)
+        .await?
     {
         sacad::SearchStatus::Found => {
             if let WorkOutput::Embed(audio_files) = work.output {
@@ -180,6 +176,11 @@ async fn handle_work(
             stats.done.fetch_add(1, Ordering::Relaxed);
         }
         sacad::SearchStatus::NotFound => {
+            progress_bar.println(format!(
+                "Not found: {} / {}",
+                query.artist.as_deref().unwrap_or("(no artist)"),
+                query.album,
+            ));
             stats.no_result_found.fetch_add(1, Ordering::Relaxed);
         }
     }

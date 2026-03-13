@@ -19,11 +19,20 @@ async fn main() -> anyhow::Result<SearchStatus> {
         .context("Failed to setup logger")?;
 
     // Run
-    search_and_download(
+    let query = Arc::new(cl_args.query);
+    let status = search_and_download(
         &cl_args.output_filepath,
-        Arc::new(cl_args.query),
+        Arc::clone(&query),
         Arc::new(cl_args.search_opts),
         &cl_args.image_proc,
     )
-    .await
+    .await?;
+    if matches!(status, SearchStatus::NotFound) {
+        log::warn!(
+            "No cover found for {} / {}",
+            query.artist.as_deref().unwrap_or("(no artist)"),
+            query.album,
+        );
+    }
+    Ok(status)
 }
