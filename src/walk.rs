@@ -19,6 +19,8 @@ pub struct Stats {
     pub audio_dirs: AtomicUsize,
     /// Count of covers needing search & download
     pub missing_covers: AtomicUsize,
+    /// Count of work items queued for processing (>= missing_covers when --ignore-existing is set)
+    pub queued: AtomicUsize,
     /// Count of covers successfully downloaded
     pub done: AtomicUsize,
     /// Count of searches that yielded no result

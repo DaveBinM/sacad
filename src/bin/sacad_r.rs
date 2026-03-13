@@ -10,7 +10,8 @@ use std::{
 use anyhow::Context as _;
 use async_channel::Receiver;
 use clap::Parser as _;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif_log_bridge::LogWrapper;
 use sacad::{
     cl::{self, CoverOutput, ImageProcessingArgs, SearchOptions, SearchQuery},
     search_and_download,
@@ -138,10 +139,11 @@ fn update_progress_bar(stats: &Stats, progress_bar: &ProgressBar) {
     let no_result = stats.no_result_found.load(Ordering::Relaxed);
     let errors = stats.errors.load(Ordering::Relaxed);
     let missing = stats.missing_covers.load(Ordering::Relaxed);
+    let queued = stats.queued.load(Ordering::Relaxed);
     let audio_files = stats.audio_files.load(Ordering::Relaxed);
     let audio_dirs = stats.audio_dirs.load(Ordering::Relaxed);
 
-    progress_bar.set_length(missing.try_into().unwrap_or(u64::MAX));
+    progress_bar.set_length(queued.try_into().unwrap_or(u64::MAX));
     progress_bar.set_position((done + no_result + errors).try_into().unwrap_or(u64::MAX));
     progress_bar.set_message(format!(
         "dirs:{audio_dirs} files:{audio_files} missing:{missing} done:{done} not_found:{no_result} errs:{errors}"
@@ -190,22 +192,27 @@ async fn main() -> anyhow::Result<()> {
     // Parse CL args
     let cl_args = cl::SacadRecursiveArgs::parse();
 
-    // Init logger
-    simple_logger::SimpleLogger::new()
-        .with_level(log::LevelFilter::Error)
-        .with_module_level(env!("CARGO_PKG_NAME"), cl_args.verbosity.into())
-        .init()
-        .context("Failed to setup logger")?;
-
     // Create progress bar
-    let stats = Arc::default();
-    let progress_bar = ProgressBar::new(0);
+    let stats: Arc<Stats> = Arc::default();
+    let multi = MultiProgress::new();
+    let progress_bar = multi.add(ProgressBar::new(0));
     progress_bar.set_style(
         ProgressStyle::default_bar()
             .template("{spinner} [{elapsed_precise}/{duration_precise}] [{bar}] {pos}/{len} {percent}% {wide_msg}")?,
     );
     progress_bar.enable_steady_tick(Duration::from_millis(300));
     update_progress_bar(&stats, &progress_bar);
+
+    // Init logger — must be done after MultiProgress so log output is routed through it,
+    // preventing log messages from spawning extra progress bar lines on screen.
+    let verbosity: log::LevelFilter = cl_args.verbosity.into();
+    let logger = simple_logger::SimpleLogger::new()
+        .with_level(log::LevelFilter::Error)
+        .with_module_level(env!("CARGO_PKG_NAME"), verbosity);
+    log::set_max_level(verbosity.max(log::LevelFilter::Error));
+    LogWrapper::new(multi, logger)
+        .try_init()
+        .context("Failed to setup logger")?;
 
     // Start workers
     let search_opts = Arc::new(cl_args.search_opts);
@@ -294,6 +301,7 @@ async fn main() -> anyhow::Result<()> {
             album: tags.album,
         };
         work_tx.send_blocking(Work { query, output })?;
+        stats.queued.fetch_add(1, Ordering::Relaxed);
     }
 
     drop(work_tx);
