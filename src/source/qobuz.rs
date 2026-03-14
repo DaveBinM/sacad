@@ -236,7 +236,23 @@ impl Source for Qobuz {
         // the Qobuz search API may return nothing for it. Fall back to the base name.
         let nalbum_base = normalize(strip_version_info(album));
         if nalbum_base != nalbum {
-            return query_covers(&nartist, &nalbum_base, &nalbum, http).await;
+            let results = query_covers(&nartist, &nalbum_base, &nalbum, http).await?;
+            if !results.is_empty() {
+                return Ok(results);
+            }
+        }
+
+        // For multi-title releases (e.g. double A-sides "Song A (Extended) / Song B (Extended)"),
+        // "/" URL-encodes to %2F which Qobuz search cannot handle. Try just the first title,
+        // with its own version suffix stripped.
+        let pre_slash = nalbum_base
+            .split_once(" / ")
+            .or_else(|| nalbum.split_once(" / "))
+            .map(|(pre, _)| normalize(strip_version_info(pre)));
+        if let Some(first_title) = pre_slash {
+            if !first_title.is_empty() && first_title != nalbum_base && first_title != nalbum {
+                return query_covers(&nartist, &first_title, &nalbum, http).await;
+            }
         }
 
         Ok(Vec::new())
