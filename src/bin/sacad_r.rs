@@ -14,6 +14,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use indicatif_log_bridge::LogWrapper;
 use sacad::{
     cl::{self, CoverOutput, ImageProcessingArgs, SearchOptions, SearchQuery},
+    resolve_qobuz_token,
     search_and_download,
     tags::{self, DEFAULT_VARIOUS_ARTISTS_VALUE},
     walk::{AudioFileIterator, Stats},
@@ -216,7 +217,9 @@ async fn main() -> anyhow::Result<()> {
         .context("Failed to setup logger")?;
 
     // Start workers
-    let search_opts = Arc::new(cl_args.search_opts);
+    let mut search_opts = cl_args.search_opts;
+    resolve_qobuz_token(&mut search_opts).await?;
+    let search_opts = Arc::new(search_opts);
     let image_proc = Arc::new(cl_args.image_proc);
     let (work_tx, work_rx) = async_channel::bounded::<Work>(1024);
     let mut workers = Vec::with_capacity(WORKER_COUNT);

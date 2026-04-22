@@ -8,14 +8,15 @@ use std::{
     sync::Arc,
 };
 
+use anyhow::Context as _;
 use itertools::Itertools as _;
 
 use crate::{
-    cl::{ImageProcessingArgs, SearchOptions, SearchQuery},
+    cl::{ImageProcessingArgs, SearchOptions, SearchQuery, SourceName},
     cover::{Cover, CoverKey, SearchReference},
     http::SourceHttpClient,
     perceptual_hash::PerceptualHash,
-    source::{Source, SourceError},
+    source::{Source, SourceError, qobuz_login, qobuz_with_token},
 };
 
 pub mod cl;
@@ -29,6 +30,24 @@ pub mod tags;
 pub mod walk;
 
 /// Search for covers from all sources
+/// Resolve a Qobuz auth token into `opts.qobuz_token` if not already set.
+/// If `--qobuz-email` + `--qobuz-password` were provided, logs in once and stores the
+/// resulting token so subsequent calls to `search_and_download` reuse it without re-logging in.
+/// Call this once before wrapping `SearchOptions` in `Arc`.
+pub async fn resolve_qobuz_token(opts: &mut SearchOptions) -> anyhow::Result<()> {
+    if opts.qobuz_token.is_some() {
+        return Ok(());
+    }
+    if let (Some(email), Some(password)) = (opts.qobuz_email.take(), opts.qobuz_password.take()) {
+        opts.qobuz_token = Some(
+            qobuz_login(&email, &password)
+                .await
+                .context("Qobuz login failed")?,
+        );
+    }
+    Ok(())
+}
+
 async fn search_all_sources(query: &Arc<SearchQuery>, search: &Arc<SearchOptions>) -> Vec<Cover> {
     let cache_dir = match http::default_cache_dir() {
         Ok(d) => d,
@@ -37,9 +56,14 @@ async fn search_all_sources(query: &Arc<SearchQuery>, search: &Arc<SearchOptions
             return Vec::new();
         }
     };
+
     let mut sources_searches = Vec::with_capacity(search.cover_sources.len());
     for source_name in search.cover_sources.iter().copied() {
-        let source: Box<dyn Source> = (&source_name).into();
+        let source: Box<dyn Source> = if source_name == SourceName::Qobuz {
+            Box::new(qobuz_with_token(search.qobuz_token.clone()))
+        } else {
+            (&source_name).into()
+        };
         let mut http = match SourceHttpClient::new(
             source_name,
             source.user_agent(),

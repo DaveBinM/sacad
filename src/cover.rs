@@ -499,6 +499,9 @@ mod tests {
                 size,
                 size_tolerance_prct: 25,
                 cover_sources: vec![SourceName::Deezer],
+                qobuz_token: None,
+                qobuz_email: None,
+                qobuz_password: None,
             }
         }
 

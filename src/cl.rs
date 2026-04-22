@@ -128,6 +128,17 @@ pub struct SearchOptions {
     /// Use multiple times to search from several sources.
     #[clap(short = 's', long, default_values_t = SourceName::VARIANTS.to_vec())]
     pub cover_sources: Vec<SourceName>,
+    /// Qobuz user authentication token. Required to use Qobuz as a cover source.
+    /// The Qobuz API now requires user login; without credentials the Qobuz source is skipped.
+    /// Use either this flag or --qobuz-email + --qobuz-password.
+    #[clap(long = "qobuz-token", conflicts_with_all = ["qobuz_email", "qobuz_password"])]
+    pub qobuz_token: Option<String>,
+    /// Qobuz account email address. Use with --qobuz-password to enable the Qobuz source.
+    #[clap(long = "qobuz-email", requires = "qobuz_password")]
+    pub qobuz_email: Option<String>,
+    /// Qobuz account password (plain text — hashed before sending).
+    #[clap(long = "qobuz-password", requires = "qobuz_email")]
+    pub qobuz_password: Option<String>,
 }
 
 impl SearchOptions {

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use clap::Parser as _;
-use sacad::{SearchStatus, cl, search_and_download};
+use sacad::{SearchStatus, cl, resolve_qobuz_token, search_and_download};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<SearchStatus> {
@@ -20,10 +20,12 @@ async fn main() -> anyhow::Result<SearchStatus> {
 
     // Run
     let query = Arc::new(cl_args.query);
+    let mut search_opts = cl_args.search_opts;
+    resolve_qobuz_token(&mut search_opts).await?;
     let status = search_and_download(
         &cl_args.output_filepath,
         Arc::clone(&query),
-        Arc::new(cl_args.search_opts),
+        Arc::new(search_opts),
         &cl_args.image_proc,
     )
     .await?;

@@ -145,6 +145,16 @@ pub(crate) trait Source: Sync + Send {
     }
 }
 
+/// Create a Qobuz source with an optional user auth token
+pub(crate) fn qobuz_with_token(token: Option<String>) -> Qobuz {
+    Qobuz { token }
+}
+
+/// Log in to Qobuz with email and password, returning a user auth token
+pub(crate) async fn qobuz_login(email: &str, password: &str) -> anyhow::Result<String> {
+    qobuz::login(email, password).await
+}
+
 impl From<&SourceName> for Box<dyn Source> {
     fn from(val: &SourceName) -> Self {
         match val {
@@ -153,7 +163,7 @@ impl From<&SourceName> for Box<dyn Source> {
             SourceName::Discogs => Box::new(Discogs),
             SourceName::Itunes => Box::new(Itunes),
             SourceName::LastFm => Box::new(LastFm),
-            SourceName::Qobuz => Box::new(Qobuz),
+            SourceName::Qobuz => Box::new(Qobuz { token: None }),
         }
     }
 }

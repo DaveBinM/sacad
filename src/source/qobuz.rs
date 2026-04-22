@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use md5;
 use reqwest::{
     Url,
     header::{HeaderMap, HeaderName, HeaderValue},
@@ -18,10 +19,17 @@ use crate::{
 };
 
 /// Qobuz cover source
-pub(crate) struct Qobuz;
+pub(crate) struct Qobuz {
+    /// User auth token — required by the Qobuz API since it mandates user authentication
+    pub(crate) token: Option<String>,
+}
 
-/// Qobuz application ID
+/// Qobuz application ID used for search requests (production web player ID)
 const APP_ID: &str = "798273057";
+
+/// Qobuz application ID used for email/password login.
+/// The production app_id is OAuth-only; the Chromecast app_id still supports direct login.
+const LOGIN_APP_ID: &str = "425621600";
 
 /// Default relevance for Qobuz covers
 const QOBUZ_RELEVANCE: source::Relevance = source::Relevance {
@@ -59,6 +67,65 @@ struct ResponseImage {
     thumbnail: Option<String>,
     small: Option<String>,
     large: Option<String>,
+}
+
+/// Response from the Qobuz `/user/login` endpoint
+#[derive(Debug, serde::Deserialize)]
+struct LoginResponse {
+    user_auth_token: String,
+}
+
+/// Log in to Qobuz with email and password, returning a user auth token.
+/// The password is MD5-hashed before being sent, as required by the Qobuz API.
+pub(crate) async fn login(email: &str, password: &str) -> anyhow::Result<String> {
+    let password_md5 = format!("{:x}", md5::compute(password));
+    // Build URL-encoded form body manually — avoids needing reqwest's optional form/serde feature
+    let body = format!(
+        "app_id={LOGIN_APP_ID}&email={}&password={}",
+        percent_encode(email),
+        percent_encode(&password_md5),
+    );
+    let client = reqwest::Client::new();
+    let resp = client
+        .post("https://www.qobuz.com/api.json/0.2/user/login")
+        .header("X-App-Id", LOGIN_APP_ID)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .context("Failed to connect to Qobuz login endpoint")?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body: String = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Qobuz login failed ({status}): {body}");
+    }
+    let body: String = resp
+        .text()
+        .await
+        .context("Failed to read Qobuz login response")?;
+    let login_resp: LoginResponse =
+        serde_json::from_str(&body).context("Failed to parse Qobuz login response")?;
+    Ok(login_resp.user_auth_token)
+}
+
+/// Percent-encode a string for use in `application/x-www-form-urlencoded` bodies.
+/// Only passes through unreserved characters (letters, digits, `-`, `_`, `.`, `~`);
+/// everything else is encoded as `%XX` sequences.
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut buf = [0u8; 4];
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~') {
+            out.push(c);
+        } else {
+            for b in c.encode_utf8(&mut buf).bytes() {
+                use std::fmt::Write as _;
+                #[expect(clippy::unwrap_used)] // infallible on String
+                write!(out, "%{b:02X}").unwrap();
+            }
+        }
+    }
+    out
 }
 
 /// Build the full display title by combining title and optional version.
@@ -223,6 +290,13 @@ impl Source for Qobuz {
         album: &str,
         http: &mut Arc<SourceHttpClient>,
     ) -> anyhow::Result<Vec<Cover>> {
+        if self.token.is_none() {
+            log::debug!(
+                "Qobuz source skipped: no auth token provided (use --qobuz-token)"
+            );
+            return Ok(Vec::new());
+        }
+
         let nartist = artist.map(normalize);
         let nalbum = normalize(album);
 
@@ -259,12 +333,18 @@ impl Source for Qobuz {
     }
 
     fn common_headers(&self) -> HeaderMap {
-        [(
+        let mut headers: HeaderMap = [(
             HeaderName::from_static("x-app-id"),
             HeaderValue::from_static(APP_ID),
         )]
         .into_iter()
-        .collect()
+        .collect();
+        if let Some(token) = &self.token {
+            if let Ok(v) = HeaderValue::from_str(token) {
+                headers.insert(HeaderName::from_static("x-user-auth-token"), v);
+            }
+        }
+        headers
     }
 }
 
@@ -308,24 +388,38 @@ mod tests {
         );
     }
 
+    fn qobuz_with_token() -> Option<Qobuz> {
+        let token = std::env::var("QOBUZ_TOKEN").ok()?;
+        Some(Qobuz { token: Some(token) })
+    }
+
     #[tokio::test]
     async fn has_results() {
         let _ = simple_logger::init_with_env();
-        let source = Qobuz;
+        let Some(source) = qobuz_with_token() else {
+            eprintln!("QOBUZ_TOKEN not set, skipping Qobuz integration test");
+            return;
+        };
         source_has_results(source, SourceName::Qobuz).await;
     }
 
     #[tokio::test]
     async fn has_results_compilation() {
         let _ = simple_logger::init_with_env();
-        let source = Qobuz;
+        let Some(source) = qobuz_with_token() else {
+            eprintln!("QOBUZ_TOKEN not set, skipping Qobuz integration test");
+            return;
+        };
         source_has_results_compilation(source, SourceName::Qobuz).await;
     }
 
     #[tokio::test]
     async fn has_no_results() {
         let _ = simple_logger::init_with_env();
-        let source = Qobuz;
+        let Some(source) = qobuz_with_token() else {
+            eprintln!("QOBUZ_TOKEN not set, skipping Qobuz integration test");
+            return;
+        };
         source_no_results(source, SourceName::Qobuz).await;
     }
 }
